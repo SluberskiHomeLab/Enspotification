@@ -1,10 +1,11 @@
 const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, getVoiceConnection } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, getVoiceConnection, StreamType } = require('@discordjs/voice');
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
 const { Readable } = require('stream');
+const AudioManager = require('./AudioManager');
 require('dotenv').config();
 
 class EnspotificationBot {
@@ -33,6 +34,9 @@ class EnspotificationBot {
         this.voiceDevices = new Map(); // Track Spotify Connect devices for voice channels
         this.browserInstances = new Map(); // Track browser instances per guild
         this.deviceId = null;
+
+        // Initialize audio manager
+        this.audioManager = new AudioManager();
 
         this.setupExpress();
         this.setupDiscordBot();
@@ -1048,46 +1052,86 @@ class EnspotificationBot {
 
     async startAudioCapture(guildId, voiceDevice, player) {
         try {
-            const { page } = voiceDevice;
+            const { page, deviceId } = voiceDevice;
             
-            // Enable audio capture in the browser
-            await page.evaluateOnNewDocument(() => {
-                // Override getUserMedia to capture system audio
-                navigator.mediaDevices.getUserMedia = navigator.mediaDevices.getUserMedia || navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
-            });
-
-            // Create a readable stream from the browser's audio
-            const audioStream = await this.createAudioStreamFromBrowser(page);
+            // Configure browser audio to output to our virtual sink
+            await this.configureBrowserAudio(page, guildId);
+            
+            // Create audio stream from PulseAudio virtual source
+            const audioStream = await this.audioManager.createAudioStream(guildId);
             
             if (audioStream) {
                 const resource = createAudioResource(audioStream, {
-                    inputType: 'pcm_s16le'
+                    inputType: StreamType.Opus,
+                    inlineVolume: true
+                });
+
+                // Set up player event handlers
+                player.on('stateChange', (oldState, newState) => {
+                    console.log(`🎵 Audio player transitioned from ${oldState.status} to ${newState.status} in guild ${guildId}`);
+                    
+                    if (newState.status === AudioPlayerStatus.Idle && oldState.status !== AudioPlayerStatus.Idle) {
+                        console.log(`🔇 Audio playback ended in guild ${guildId}`);
+                    }
+                });
+
+                player.on('error', error => {
+                    console.error(`🚨 Audio player error in guild ${guildId}:`, error);
                 });
 
                 player.play(resource);
-                console.log(`🔊 Started audio streaming for guild ${guildId}`);
+                console.log(`🔊 Started audio streaming for guild ${guildId} from Spotify device ${deviceId}`);
+            } else {
+                console.error(`❌ Failed to create audio stream for guild ${guildId}`);
             }
 
         } catch (error) {
-            console.error('Audio capture error:', error);
+            console.error(`🚨 Audio capture error for guild ${guildId}:`, error);
         }
     }
 
-    async createAudioStreamFromBrowser(page) {
-        // This is a simplified implementation
-        // In a production environment, you would need to capture actual browser audio
-        // This requires more complex setup with virtual audio devices
-        
-        // For now, return a mock stream that represents the concept
-        // You would need to implement actual audio capture using tools like:
-        // - Virtual audio cables
-        // - Browser audio capture APIs
-        // - Desktop audio capture
-        
-        console.log('⚠️  Audio capture from browser needs additional implementation');
-        console.log('📝 This would require virtual audio drivers or desktop capture');
-        
-        return null; // Placeholder for actual implementation
+    async configureBrowserAudio(page, guildId) {
+        try {
+            // Wait for Spotify Web Player to be ready
+            await page.waitForSelector('button[data-testid="control-button-playpause"]', { timeout: 30000 });
+            
+            // Inject script to route audio to our virtual sink
+            await page.evaluate((sinkName) => {
+                // Override the Web Audio API to use our virtual sink
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                const originalCreateMediaStreamDestination = AudioContext.prototype.createMediaStreamDestination;
+                
+                AudioContext.prototype.createMediaStreamDestination = function() {
+                    const destination = originalCreateMediaStreamDestination.call(this);
+                    
+                    // Try to set the sink ID for audio output
+                    if (navigator.mediaDevices && navigator.mediaDevices.selectAudioOutput) {
+                        navigator.mediaDevices.selectAudioOutput({ deviceId: sinkName })
+                            .then(() => console.log('Audio output set to virtual sink'))
+                            .catch(err => console.warn('Failed to set audio output:', err));
+                    }
+                    
+                    return destination;
+                };
+
+                // Also try to set the default audio output
+                if (HTMLAudioElement.prototype.setSinkId) {
+                    const originalPlay = HTMLAudioElement.prototype.play;
+                    HTMLAudioElement.prototype.play = function() {
+                        if (this.sinkId !== sinkName) {
+                            this.setSinkId(sinkName).catch(console.warn);
+                        }
+                        return originalPlay.call(this);
+                    };
+                }
+
+                console.log(`Audio configured for virtual sink: ${sinkName}`);
+            }, `enspotification-sink-${guildId}`);
+
+            console.log(`� Configured browser audio routing for guild ${guildId}`);
+        } catch (error) {
+            console.error(`🚨 Failed to configure browser audio for guild ${guildId}:`, error);
+        }
     }
 
     formatDuration(ms) {
@@ -1120,6 +1164,11 @@ class EnspotificationBot {
         if (browser) {
             browser.close().catch(console.error);
             this.browserInstances.delete(guildId);
+        }
+
+        // Cleanup audio streaming
+        if (this.audioManager) {
+            this.audioManager.stopAudioStream(guildId).catch(console.error);
         }
 
         this.currentTracks.delete(guildId);

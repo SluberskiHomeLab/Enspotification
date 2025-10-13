@@ -1,0 +1,30 @@
+#!/usr/bin/pulseaudio -nF
+#
+# PulseAudio configuration for Enspotification Docker container
+# Creates virtual audio devices for capturing browser audio
+
+# Load core modules
+load-module module-device-restore
+load-module module-stream-restore
+load-module module-card-restore
+load-module module-augment-properties
+load-module module-switch-on-port-available
+
+# Create a null sink for virtual audio output (where browser sends audio)
+load-module module-null-sink sink_name=spotify_output sink_properties=device.description="Spotify_Output"
+
+# Create a virtual source that captures from the null sink
+load-module module-virtual-source source_name=spotify_capture master=spotify_output.monitor source_properties=device.description="Spotify_Capture"
+
+# Load the native protocol module
+load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse/pulse-socket
+
+# Load position event sounds
+load-module module-position-event-sounds
+
+# Load default driver (in case we need it)
+load-module module-default-device-restore
+
+# Set default sink and source
+set-default-sink spotify_output
+set-default-source spotify_capture
