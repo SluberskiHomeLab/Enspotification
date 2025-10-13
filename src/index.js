@@ -1128,7 +1128,7 @@ class EnspotificationBot {
                 console.log(`Audio configured for virtual sink: ${sinkName}`);
             }, `enspotification-sink-${guildId}`);
 
-            console.log(`� Configured browser audio routing for guild ${guildId}`);
+            console.log(`🔊 Configured browser audio routing for guild ${guildId}`);
         } catch (error) {
             console.error(`🚨 Failed to configure browser audio for guild ${guildId}:`, error);
         }
