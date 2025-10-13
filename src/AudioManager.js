@@ -20,12 +20,100 @@ class AudioManager {
             // Wait for PulseAudio to be ready
             await this.waitForPulseAudio();
             
+            // Set up base virtual devices for audio capture
+            await this.setupBaseVirtualDevices();
+            
             console.log('✅ PulseAudio initialized successfully');
             return true;
         } catch (error) {
             console.error('❌ Failed to initialize PulseAudio:', error);
             return false;
         }
+    }
+
+    async setupBaseVirtualDevices() {
+        console.log('🎛️ Setting up base virtual audio devices...');
+        
+        try {
+            // Create a null sink for capturing Spotify audio
+            await this.runPactlCommand([
+                'load-module', 'module-null-sink',
+                'sink_name=spotify_capture',
+                'sink_properties=device.description="Spotify Audio Capture"'
+            ]);
+
+            // Create virtual source from the null sink's monitor
+            await this.runPactlCommand([
+                'load-module', 'module-virtual-source',
+                'source_name=discord_input',
+                'master=spotify_capture.monitor'
+            ]);
+
+            console.log('✅ Base virtual audio devices created');
+        } catch (error) {
+            console.error('❌ Failed to setup base virtual devices:', error);
+            throw error;
+        }
+    }
+
+    async setupVirtualDevices(guildId) {
+        console.log(`🎛️ Setting up virtual audio devices for guild ${guildId}...`);
+        
+        try {
+            const sinkName = `enspotification-sink-${guildId}`;
+            const sourceName = `enspotification-source-${guildId}`;
+
+            // Create guild-specific null sink
+            await this.runPactlCommand([
+                'load-module', 'module-null-sink',
+                `sink_name=${sinkName}`,
+                `sink_properties=device.description="Enspotification Guild ${guildId}"`
+            ]);
+
+            // Create virtual source from the sink's monitor
+            await this.runPactlCommand([
+                'load-module', 'module-virtual-source',
+                `source_name=${sourceName}`,
+                `master=${sinkName}.monitor`
+            ]);
+
+            console.log(`✅ Virtual devices created for guild ${guildId}`);
+            return { sinkName, sourceName };
+            
+        } catch (error) {
+            console.error(`❌ Failed to setup virtual devices for guild ${guildId}:`, error);
+            throw error;
+        }
+    }
+
+    async runPactlCommand(args) {
+        return new Promise((resolve, reject) => {
+            const pactl = spawn('pactl', args, {
+                env: {
+                    PULSE_RUNTIME_PATH: '/tmp/pulse',
+                    XDG_RUNTIME_DIR: '/tmp/pulse'
+                }
+            });
+
+            let output = '';
+            let error = '';
+
+            pactl.stdout.on('data', (data) => {
+                output += data.toString();
+            });
+
+            pactl.stderr.on('data', (data) => {
+                error += data.toString();
+            });
+
+            pactl.on('close', (code) => {
+                if (code === 0) {
+                    resolve(output);
+                } else {
+                    reject(new Error(`pactl command failed: ${error}`));
+                }
+            });
+        });
     }
 
     async startPulseAudio() {
@@ -149,10 +237,11 @@ class AudioManager {
     async startAudioCapture(guildId) {
         return new Promise((resolve, reject) => {
             try {
-                // Use FFmpeg to capture from PulseAudio virtual source and convert to Discord format
+                // Use FFmpeg to capture from guild-specific virtual source
+                const sourceName = `enspotification-source-${guildId}`;
                 const ffmpeg = spawn('ffmpeg', [
                     '-f', 'pulse',
-                    '-i', 'spotify_capture',
+                    '-i', sourceName,
                     '-acodec', 'pcm_s16le',
                     '-f', 's16le',
                     '-ar', '48000',

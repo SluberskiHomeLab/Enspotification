@@ -6,6 +6,7 @@ const cors = require('cors');
 const puppeteer = require('puppeteer');
 const { Readable } = require('stream');
 const AudioManager = require('./AudioManager');
+const ffmpeg = require('fluent-ffmpeg');
 require('dotenv').config();
 
 class EnspotificationBot {
@@ -767,7 +768,8 @@ class EnspotificationBot {
                 image: track.album.images[0]?.url,
                 uri: track.uri,
                 spotifyUrl: track.external_urls.spotify,
-                duration: track.duration_ms
+                duration: track.duration_ms,
+                preview_url: track.preview_url
             };
 
             // Create or get Spotify Connect device for this voice channel
@@ -814,7 +816,7 @@ Use \`/join\` command to reconnect your Spotify account, then try \`/voice-play\
             });
 
             // Start capturing and streaming audio to Discord
-            await this.startAudioCapture(guildId, voiceDevice, player);
+            await this.startAudioCapture(guildId, voiceDevice, player, trackInfo);
 
             this.currentTracks.set(guildId, trackInfo);
 
@@ -1005,7 +1007,7 @@ Use \`/join\` command to reconnect your Spotify account, then try \`/voice-play\
 
         let browser;
         try {
-            // Launch a headless browser for Spotify Web Playback SDK
+            // Launch browser with audio capture capabilities
             const browser = await puppeteer.launch({
                 headless: true,
                 args: [
@@ -1017,13 +1019,26 @@ Use \`/join\` command to reconnect your Spotify account, then try \`/voice-play\
                     '--no-zygote',
                     '--single-process',
                     '--disable-gpu',
-                    '--autoplay-policy=no-user-gesture-required'
+                    '--autoplay-policy=no-user-gesture-required',
+                    // Audio capture specific flags
+                    '--enable-features=PulseAudio',
+                    '--audio-output-device-name=default',
+                    '--enable-audio-service-sandbox=false',
+                    '--disable-audio-sandbox',
+                    // Set default audio device to our virtual sink
+                    `--audio-output-device=enspotification-sink-${guildId}`,
+                    '--enable-webaudio',
+                    '--allow-running-insecure-content',
+                    // Media permissions
+                    '--use-fake-ui-for-media-stream',
+                    '--allow-file-access-from-files',
+                    '--disable-web-security'
                 ]
             });
 
             const page = await browser.newPage();
             
-            // Set up the Spotify Web Playback SDK page
+            // Set up the Spotify Web Playback SDK page with audio capture
             await page.setContent(`
                 <!DOCTYPE html>
                 <html>
@@ -1033,6 +1048,7 @@ Use \`/join\` command to reconnect your Spotify account, then try \`/voice-play\
                 </head>
                 <body>
                     <div id="status">Initializing Spotify Connect Device...</div>
+                    <audio id="audioElement" autoplay></audio>
                     <script>
                         let player;
                         let deviceId;
@@ -1094,6 +1110,13 @@ Use \`/join\` command to reconnect your Spotify account, then try \`/voice-play\
                                     if (state) {
                                         window.currentTrack = state.track_window.current_track;
                                         window.playerState = state;
+                                        
+                                        // Update audio element if available
+                                        const audioElement = document.getElementById('audioElement');
+                                        if (audioElement && state.track_window.current_track) {
+                                            const track = state.track_window.current_track;
+                                            console.log('Now playing:', track.name, 'by', track.artists[0].name);
+                                        }
                                     }
                                 });
 
@@ -1150,18 +1173,23 @@ Use \`/join\` command to reconnect your Spotify account, then try \`/voice-play\
             
             const deviceId = await page.evaluate(() => window.deviceId);
 
+            // Set up virtual audio devices for this guild
+            const virtualDevices = await this.audioManager.setupVirtualDevices(guildId);
+
             voiceDevice = {
                 deviceId,
                 browser,
                 page,
                 isActive: true,
-                guildId
+                guildId,
+                virtualDevices
             };
 
             this.voiceDevices.set(guildId, voiceDevice);
             this.browserInstances.set(guildId, browser);
 
             console.log(`🎵 Created Spotify Connect device for guild ${guildId}: ${deviceId}`);
+            console.log(`🎛️ Virtual audio devices: ${virtualDevices.sinkName} → ${virtualDevices.sourceName}`);
             return voiceDevice;
 
         } catch (error) {
@@ -1186,85 +1214,231 @@ Use \`/join\` command to reconnect your Spotify account, then try \`/voice-play\
         }
     }
 
-    async startAudioCapture(guildId, voiceDevice, player) {
+    async startAudioCapture(guildId, voiceDevice, player, trackInfo) {
         try {
             const { page, deviceId } = voiceDevice;
             
-            // Configure browser audio to output to our virtual sink
-            await this.configureBrowserAudio(page, guildId);
+            console.log(`🔊 Starting audio streaming for guild ${guildId}...`);
             
-            // Create audio stream from PulseAudio virtual source
-            const audioStream = await this.audioManager.createAudioStream(guildId);
+            let audioStream;
             
-            if (audioStream) {
-                const resource = createAudioResource(audioStream, {
-                    inputType: StreamType.Opus,
-                    inlineVolume: true
-                });
-
-                // Set up player event handlers
-                player.on('stateChange', (oldState, newState) => {
-                    console.log(`🎵 Audio player transitioned from ${oldState.status} to ${newState.status} in guild ${guildId}`);
-                    
-                    if (newState.status === AudioPlayerStatus.Idle && oldState.status !== AudioPlayerStatus.Idle) {
-                        console.log(`🔇 Audio playback ended in guild ${guildId}`);
-                    }
-                });
-
-                player.on('error', error => {
-                    console.error(`🚨 Audio player error in guild ${guildId}:`, error);
-                });
-
-                player.play(resource);
-                console.log(`🔊 Started audio streaming for guild ${guildId} from Spotify device ${deviceId}`);
-            } else {
-                console.error(`❌ Failed to create audio stream for guild ${guildId}`);
+            // Priority order for audio sources:
+            // 1. Full Spotify Connect audio capture (if implemented)
+            // 2. YouTube search and stream (alternative source)
+            // 3. Spotify preview URL (30-second clips)
+            // 4. Test tone generator (fallback)
+            
+            if (await this.canCaptureFullAudio()) {
+                console.log(`🎵 Attempting full audio capture from Spotify Connect device`);
+                audioStream = await this.captureFullSpotifyAudio(page, guildId);
+            } else if (trackInfo) {
+                // Try YouTube as alternative for full songs
+                console.log(`🔍 Searching YouTube for full song: ${trackInfo.title} by ${trackInfo.artist}`);
+                audioStream = await this.searchAndStreamYouTube(trackInfo);
             }
+            
+            // Fallback to Spotify preview if other methods fail
+            if (!audioStream && trackInfo && trackInfo.preview_url) {
+                console.log(`🎵 Using Spotify preview URL (30-second clip)`);
+                audioStream = await this.createPreviewAudioStream(trackInfo.preview_url);
+            }
+            
+            // Final fallback to test tone
+            if (!audioStream) {
+                console.log(`ℹ️ No audio sources available, using test tone`);
+                audioStream = this.createTestToneStream();
+            }
+            
+            const resource = createAudioResource(audioStream, {
+                inputType: StreamType.Raw,
+                inlineVolume: true
+            });
+
+            // Set up player event handlers
+            player.on('stateChange', (oldState, newState) => {
+                console.log(`🎵 Audio player transitioned from ${oldState.status} to ${newState.status} in guild ${guildId}`);
+                
+                if (newState.status === AudioPlayerStatus.Idle && oldState.status !== AudioPlayerStatus.Idle) {
+                    console.log(`🔇 Audio playback ended in guild ${guildId}`);
+                }
+            });
+
+            player.on('error', error => {
+                console.error(`🚨 Audio player error in guild ${guildId}:`, error);
+            });
+
+            player.play(resource);
+            console.log(`🔊 Started audio streaming for guild ${guildId}`);
 
         } catch (error) {
             console.error(`🚨 Audio capture error for guild ${guildId}:`, error);
         }
     }
 
-    async configureBrowserAudio(page, guildId) {
+    async createPreviewAudioStream(previewUrl) {
+        const https = require('https');
+        const ffmpeg = require('fluent-ffmpeg');
+        
         try {
-            // Wait for Spotify Web Player to be ready
-            await page.waitForSelector('button[data-testid="control-button-playpause"]', { timeout: 30000 });
+            console.log(`🎵 Creating audio stream from preview URL: ${previewUrl}`);
             
-            // Inject script to route audio to our virtual sink
-            await page.evaluate((sinkName) => {
-                // Override the Web Audio API to use our virtual sink
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                const originalCreateMediaStreamDestination = AudioContext.prototype.createMediaStreamDestination;
+            // Use FFmpeg to convert MP3 preview to PCM for Discord
+            const ffmpegStream = ffmpeg(previewUrl)
+                .audioFrequency(48000)
+                .audioChannels(2)
+                .audioCodec('pcm_s16le')
+                .format('s16le')
+                .pipe();
+
+            return ffmpegStream;
+        } catch (error) {
+            console.error('Failed to create preview audio stream:', error);
+            return this.createTestToneStream();
+        }
+    }
+
+    createTestToneStream() {
+        // Create a test tone for audio verification
+        const sampleRate = 48000;
+        const channels = 2;
+        const frequency = 440; // A4 note
+        const amplitude = 0.1; // Quiet volume
+        let sampleCount = 0;
+        
+        return new Readable({
+            read() {
+                const samplesPerChunk = 960; // 20ms at 48kHz
+                const buffer = Buffer.alloc(samplesPerChunk * channels * 2); // 16-bit samples
                 
-                AudioContext.prototype.createMediaStreamDestination = function() {
-                    const destination = originalCreateMediaStreamDestination.call(this);
+                for (let i = 0; i < samplesPerChunk; i++) {
+                    const sample = Math.sin(2 * Math.PI * frequency * sampleCount / sampleRate) * amplitude;
+                    const value = Math.floor(sample * 32767); // Convert to 16-bit signed
                     
-                    // Try to set the sink ID for audio output
-                    if (navigator.mediaDevices && navigator.mediaDevices.selectAudioOutput) {
-                        navigator.mediaDevices.selectAudioOutput({ deviceId: sinkName })
-                            .then(() => console.log('Audio output set to virtual sink'))
-                            .catch(err => console.warn('Failed to set audio output:', err));
+                    // Stereo - write to both channels
+                    buffer.writeInt16LE(value, (i * channels) * 2);
+                    buffer.writeInt16LE(value, (i * channels + 1) * 2);
+                    
+                    sampleCount++;
+                }
+                
+                this.push(buffer);
+            }
+        });
+    }
+
+    async canCaptureFullAudio() {
+        // Check if PulseAudio and audio capture are available
+        try {
+            await this.audioManager.initialize();
+            return true;
+        } catch (error) {
+            console.log('Full audio capture not available:', error.message);
+            return false;
+        }
+    }
+
+    async captureFullSpotifyAudio(page, guildId) {
+        try {
+            console.log(`🎵 Setting up full Spotify audio capture for guild ${guildId}...`);
+            
+            // 1. Configure the Spotify Connect device to output to our virtual sink
+            await this.routeSpotifyToVirtualSink(page, guildId);
+            
+            // 2. Start capturing audio from the virtual source
+            const audioStream = await this.audioManager.createAudioStream(guildId);
+            
+            if (audioStream) {
+                console.log(`✅ Full Spotify audio capture active for guild ${guildId}`);
+                return audioStream;
+            }
+            
+            throw new Error('Failed to create audio stream from virtual source');
+            
+        } catch (error) {
+            console.error(`❌ Full Spotify audio capture failed for guild ${guildId}:`, error);
+            return null;
+        }
+    }
+
+    async routeSpotifyToVirtualSink(page, guildId) {
+        try {
+            console.log(`🔧 Configuring Spotify Connect device to use virtual audio sink...`);
+            
+            // Configure the browser to output audio to our virtual sink
+            await page.evaluateOnNewDocument((sinkName) => {
+                // Override Web Audio API to route to virtual sink
+                const OriginalAudioContext = window.AudioContext || window.webkitAudioContext;
+                
+                window.AudioContext = function(...args) {
+                    const ctx = new OriginalAudioContext(...args);
+                    
+                    // Set the audio output device to our virtual sink
+                    if (ctx.setSinkId) {
+                        ctx.setSinkId(sinkName).catch(console.warn);
                     }
                     
-                    return destination;
+                    return ctx;
                 };
-
-                // Also try to set the default audio output
-                if (HTMLAudioElement.prototype.setSinkId) {
-                    const originalPlay = HTMLAudioElement.prototype.play;
-                    HTMLAudioElement.prototype.play = function() {
-                        if (this.sinkId !== sinkName) {
-                            this.setSinkId(sinkName).catch(console.warn);
+                
+                window.webkitAudioContext = window.AudioContext;
+                
+                // Also override HTML5 audio elements
+                const originalCreateElement = document.createElement;
+                document.createElement = function(tagName) {
+                    const element = originalCreateElement.call(this, tagName);
+                    if (tagName.toLowerCase() === 'audio') {
+                        if (element.setSinkId) {
+                            element.setSinkId(sinkName).catch(console.warn);
                         }
-                        return originalPlay.call(this);
-                    };
-                }
-
-                console.log(`Audio configured for virtual sink: ${sinkName}`);
+                    }
+                    return element;
+                };
+                
+                console.log(`Spotify audio routed to virtual sink: ${sinkName}`);
             }, `enspotification-sink-${guildId}`);
+            
+            // Set Chrome audio output device via command line args
+            const browser = page.browser();
+            console.log(`✅ Browser audio routing configured for guild ${guildId}`);
+            
+        } catch (error) {
+            console.error(`Failed to route Spotify audio to virtual sink:`, error);
+            throw error;
+        }
+    }
 
-            console.log(`🔊 Configured browser audio routing for guild ${guildId}`);
+    async searchAndStreamYouTube(trackInfo) {
+        // Placeholder for YouTube integration
+        // This would:
+        // 1. Search YouTube for the track
+        // 2. Get audio stream URL
+        // 3. Use youtube-dl or similar to stream audio
+        
+        console.log(`🚧 YouTube streaming not yet implemented for: ${trackInfo.title} by ${trackInfo.artist}`);
+        return null;
+    }
+
+    async configureBrowserAudio(page, guildId) {
+        try {
+            console.log(`🔊 Configuring browser audio for guild ${guildId}...`);
+            
+            // Wait for Spotify Web Player to be ready
+            await page.waitForFunction(() => {
+                return window.getPlayer && window.getPlayer() && window.deviceReady;
+            }, { timeout: 30000 });
+
+            // Set browser audio arguments for capturing
+            const browser = page.browser();
+            console.log(`✅ Browser audio configuration completed for guild ${guildId}`);
+            
+            // Note: In a production environment, you would need to implement actual audio capture
+            // This could be done using:
+            // 1. PulseAudio virtual devices (requires proper container setup)
+            // 2. Screen/desktop audio capture
+            // 3. Browser-specific audio capture APIs
+            
+            console.log(`ℹ️ Audio capture implementation needed - currently using test mode`);
+            
         } catch (error) {
             console.error(`🚨 Failed to configure browser audio for guild ${guildId}:`, error);
         }
