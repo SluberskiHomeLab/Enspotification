@@ -214,9 +214,15 @@ class EnspotificationBot {
             res.sendFile('index.html', { root: 'public' });
         });
 
-        this.app.listen(process.env.PORT || 3000, () => {
+        // Start server with proper timeout configuration
+        this.server = this.app.listen(process.env.PORT || 3000, () => {
             console.log(`🌐 Web server running on port ${process.env.PORT || 3000}`);
         });
+
+        // Configure server timeouts for better reverse proxy compatibility
+        this.server.timeout = 60000; // 60 seconds
+        this.server.keepAliveTimeout = 65000; // 65 seconds (should be > timeout)
+        this.server.headersTimeout = 66000; // 66 seconds (should be > keepAliveTimeout)
     }
 
     setupDiscordBot() {
