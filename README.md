@@ -5,11 +5,13 @@ A Discord bot that connects to Spotify and acts as a Spotify Connect device, all
 ## Features
 
 - 🎵 **Spotify Connect Device**: Acts as a virtual Spotify speaker that appears in your Spotify app
+- 🎙️ **Discord Voice Integration**: Join voice channels and play music directly through Discord
 - 🤖 **Discord Integration**: Full Discord slash command support
 - 🔐 **Secure Authentication**: Individual user Spotify OAuth authentication
 - 🐳 **Docker Ready**: Easy deployment with Docker and Docker Compose
-- 🎮 **Playback Controls**: Play, pause, skip, volume control, and search functionality
-- 📱 **Web Interface**: Built-in web player for Spotify Web Playback SDK
+- 🎮 **Dual Playback Modes**: Control via Spotify Connect OR Discord voice channels
+- 📱 **Web Interface**: Built-in web player for Spotify Web Playbook SDK
+- 🔍 **Smart Search**: Searches Spotify first, falls back to YouTube for playback
 
 ## Getting Started
 
@@ -19,15 +21,23 @@ Please See the Wiki for installation information, development information, Confi
 
 ### Discord Commands
 
-Once the bot is running and invited to your server, use these slash commands:
+The bot supports two modes of operation:
 
+#### Spotify Connect
 - `/join` - Connect your Spotify account and activate the bot as a playback device
-- `/status` - Check your connection status
-- `/play [query]` - Play a song, artist, or playlist (or resume playback)
-- `/pause` - Pause current playback
-- `/skip` - Skip to the next track
-- `/volume <0-100>` - Set playback volume
+- `/status` - Check your connection status  
 - `/disconnect` - Disconnect from Spotify
+
+#### Discord Voice Mode (Spotify Connect in Voice Channels)  
+- `/voice-join` - Join voice channel and create dedicated Spotify Connect device
+- `/voice-leave` - Leave voice channel and cleanup Spotify device
+- `/voice-play <query>` - Play Spotify music via voice channel Connect device
+- `/voice-pause` - Pause voice channel Spotify playback  
+- `/voice-resume` - Resume voice channel Spotify playback  
+- `/voice-skip` - Skip current Spotify track in voice channel
+- `/voice-stop` - Stop voice channel Spotify playback  
+- `/now-playing` - Show current Spotify track info
+- `/voice-volume <0-100>` - Adjust Spotify Connect device volume
 
 ### How It Works
 
