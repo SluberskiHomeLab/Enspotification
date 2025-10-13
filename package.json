@@ -1,7 +1,7 @@
 {
   "name": "enspotification",
-  "version": "1.0.0",
-  "description": "Spotify Discord Bot that acts as a Spotify Connect device",
+  "version": "0.3.0",
+  "description": "Spotify Discord Bot with Spotify Connect and Discord Voice Channel integration",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -19,12 +19,21 @@
   "license": "MIT",
   "dependencies": {
     "discord.js": "^14.14.1",
+    "@discordjs/voice": "^0.16.1",
     "express": "^4.18.2",
     "axios": "^1.6.2",
     "dotenv": "^16.3.1",
     "cors": "^2.8.5",
     "node-spotify-api": "^1.1.1",
-    "spotify-web-api-node": "^5.0.2"
+    "spotify-web-api-node": "^5.0.2",
+    "opusscript": "^0.0.8",
+    "node-fetch": "^2.7.0",
+    "ws": "^8.14.2",
+    "puppeteer": "^21.5.2",
+    "fluent-ffmpeg": "^2.1.3",
+    "node-record-lpcm16": "^1.0.1",
+    "speaker": "^0.5.4",
+    "prism-media": "^1.3.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

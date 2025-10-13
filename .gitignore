@@ -7,6 +7,11 @@ yarn-error.log*
 # Dev Stuff
 build-and-push.sh
 build-and-push.bat
+deploy-audio-streaming.sh
+deploy-audio-streaming.ps1
+IMPLEMENTATION-COMPLETE.md 
+AUDIO-STREAMING-ARCHITECTURE.md 
+
 
 # Environment files
 .env

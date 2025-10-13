@@ -1,8 +1,42 @@
 # Use Node.js 18 Alpine as base image
 FROM node:18-alpine
 
+# Install system dependencies for audio processing and Puppeteer
+RUN apk add --no-cache \
+    ffmpeg \
+    python3 \
+    make \
+    g++ \
+    git \
+    libc6-compat \
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    pulseaudio \
+    pulseaudio-dev \
+    alsa-utils \
+    alsa-lib \
+    alsa-lib-dev
+
 # Set working directory
 WORKDIR /app
+
+# Set Puppeteer environment variables
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# Configure PulseAudio for virtual audio devices
+RUN mkdir -p /etc/pulse
+COPY docker/pulse-config/default.pa /etc/pulse/default.pa
+COPY docker/pulse-config/daemon.conf /etc/pulse/daemon.conf
+
+# Set audio environment variables
+ENV PULSE_RUNTIME_PATH=/tmp/pulse \
+    XDG_RUNTIME_DIR=/tmp/pulse
 
 # Copy package files
 COPY package*.json ./
