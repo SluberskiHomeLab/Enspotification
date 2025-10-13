@@ -774,9 +774,37 @@ class EnspotificationBot {
             const voiceDevice = await this.getOrCreateVoiceDevice(guildId, userToken.accessToken);
             
             if (!voiceDevice) {
-                return await interaction.editReply({ 
-                    content: '❌ Failed to create Spotify Connect device for voice channel.' 
-                });
+                // Check if user token is still valid
+                let errorMessage = `❌ Failed to create Spotify Connect device for voice channel.`;
+                
+                try {
+                    this.spotifyApi.setAccessToken(userToken.accessToken);
+                    await this.spotifyApi.getMe();
+                    // Token is valid, so it's likely a different issue
+                    errorMessage += `
+
+**Possible causes:**
+• Spotify Premium account required for playback control
+• Network connectivity issues with Spotify servers  
+• Browser initialization failed in container
+• Spotify Web Playback SDK not available
+
+**Troubleshooting:**
+1. Ensure you have Spotify Premium (required for Connect API)
+2. Try again in a few seconds
+3. Check bot logs for detailed error information`;
+                } catch (tokenTest) {
+                    // Token is invalid
+                    errorMessage += `
+
+**Issue: Spotify session expired**
+Your Spotify authentication has expired and needs to be refreshed.
+
+**Solution:**
+Use \`/join\` command to reconnect your Spotify account, then try \`/voice-play\` again.`;
+                }
+                
+                return await interaction.editReply({ content: errorMessage });
             }
 
             // Start playback on the voice channel device
@@ -950,6 +978,32 @@ class EnspotificationBot {
             return voiceDevice;
         }
 
+        // Validate inputs
+        if (!accessToken) {
+            console.error('No access token provided for Spotify Connect device creation');
+            return null;
+        }
+
+        if (!guildId) {
+            console.error('No guild ID provided for Spotify Connect device creation');
+            return null;
+        }
+
+        console.log(`🔄 Creating Spotify Connect device for guild ${guildId}...`);
+
+        // Test the access token validity before creating browser instance
+        try {
+            this.spotifyApi.setAccessToken(accessToken);
+            await this.spotifyApi.getMe(); // Simple API call to test token
+        } catch (tokenError) {
+            console.error('Access token validation failed:', tokenError.message);
+            if (tokenError.statusCode === 401) {
+                console.error('Token expired or invalid - user needs to reconnect');
+                return null;
+            }
+        }
+
+        let browser;
         try {
             // Launch a headless browser for Spotify Web Playback SDK
             const browser = await puppeteer.launch({
@@ -986,36 +1040,79 @@ class EnspotificationBot {
                         window.onSpotifyWebPlaybackSDKReady = () => {
                             const token = '${accessToken}';
                             
-                            player = new Spotify.Player({
-                                name: 'Enspotification Voice (Guild ${guildId})',
-                                getOAuthToken: cb => { cb(token); },
-                                volume: 0.8
-                            });
+                            try {
+                                player = new Spotify.Player({
+                                    name: 'Enspotification Voice (Guild ${guildId})',
+                                    getOAuthToken: cb => { cb(token); },
+                                    volume: 0.8
+                                });
 
-                            // Ready
-                            player.addListener('ready', ({ device_id }) => {
-                                console.log('Ready with Device ID', device_id);
-                                deviceId = device_id;
-                                window.deviceReady = true;
-                                window.deviceId = device_id;
-                                document.getElementById('status').textContent = 'Device Ready: ' + device_id;
-                            });
+                                // Ready
+                                player.addListener('ready', ({ device_id }) => {
+                                    console.log('Ready with Device ID', device_id);
+                                    deviceId = device_id;
+                                    window.deviceReady = true;
+                                    window.deviceId = device_id;
+                                    document.getElementById('status').textContent = 'Device Ready: ' + device_id;
+                                });
 
-                            // Not Ready
-                            player.addListener('not_ready', ({ device_id }) => {
-                                console.log('Device ID has gone offline', device_id);
-                                window.deviceReady = false;
-                            });
+                                // Not Ready
+                                player.addListener('not_ready', ({ device_id }) => {
+                                    console.log('Device ID has gone offline', device_id);
+                                    window.deviceReady = false;
+                                });
 
-                            // Player state changed
-                            player.addListener('player_state_changed', state => {
-                                if (state) {
-                                    window.currentTrack = state.track_window.current_track;
-                                    window.playerState = state;
-                                }
-                            });
+                                // Initialization error
+                                player.addListener('initialization_error', ({ message }) => {
+                                    console.error('Spotify player initialization error:', message);
+                                    window.lastError = 'Initialization error: ' + message;
+                                    document.getElementById('status').textContent = 'Initialization Error: ' + message;
+                                });
 
-                            player.connect();
+                                // Authentication error
+                                player.addListener('authentication_error', ({ message }) => {
+                                    console.error('Spotify authentication error:', message);
+                                    window.lastError = 'Authentication error: ' + message;
+                                    document.getElementById('status').textContent = 'Auth Error: ' + message;
+                                });
+
+                                // Account error
+                                player.addListener('account_error', ({ message }) => {
+                                    console.error('Spotify account error:', message);
+                                    window.lastError = 'Account error: ' + message;
+                                    document.getElementById('status').textContent = 'Account Error: ' + message;
+                                });
+
+                                // Playback error
+                                player.addListener('playback_error', ({ message }) => {
+                                    console.error('Spotify playback error:', message);
+                                    window.lastError = 'Playback error: ' + message;
+                                });
+
+                                // Player state changed
+                                player.addListener('player_state_changed', state => {
+                                    if (state) {
+                                        window.currentTrack = state.track_window.current_track;
+                                        window.playerState = state;
+                                    }
+                                });
+
+                                // Connect the player
+                                player.connect().then(success => {
+                                    if (success) {
+                                        console.log('Successfully connected to Spotify!');
+                                    } else {
+                                        console.error('Failed to connect to Spotify');
+                                        window.lastError = 'Failed to connect to Spotify';
+                                        document.getElementById('status').textContent = 'Connection Failed';
+                                    }
+                                });
+
+                            } catch (error) {
+                                console.error('Error creating Spotify player:', error);
+                                window.lastError = 'Player creation error: ' + error.message;
+                                document.getElementById('status').textContent = 'Player Error: ' + error.message;
+                            }
                         };
                         
                         // Expose player for control
@@ -1026,8 +1123,31 @@ class EnspotificationBot {
                 </html>
             `);
 
-            // Wait for device to be ready
-            await page.waitForFunction(() => window.deviceReady, { timeout: 30000 });
+            // Wait for device to be ready with better error handling
+            try {
+                await page.waitForFunction(() => window.deviceReady, { timeout: 30000 });
+                const deviceId = await page.evaluate(() => window.deviceId);
+                
+                if (!deviceId) {
+                    throw new Error('Device ID not available after initialization');
+                }
+                
+                console.log(`✅ Spotify Connect device ready: ${deviceId}`);
+            } catch (waitError) {
+                console.error('Timeout or error waiting for Spotify device to initialize:', waitError.message);
+                
+                // Try to get more information about what went wrong
+                const pageContent = await page.content();
+                const consoleMessages = await page.evaluate(() => {
+                    return window.lastError || 'No specific error information available';
+                });
+                
+                console.error('Page content length:', pageContent.length);
+                console.error('Console messages:', consoleMessages);
+                
+                throw new Error(`Spotify device initialization failed: ${waitError.message}`);
+            }
+            
             const deviceId = await page.evaluate(() => window.deviceId);
 
             voiceDevice = {
@@ -1046,6 +1166,22 @@ class EnspotificationBot {
 
         } catch (error) {
             console.error('Failed to create Spotify Connect device:', error);
+            console.error('Error details:', {
+                message: error.message,
+                stack: error.stack,
+                guildId: guildId,
+                hasAccessToken: !!accessToken
+            });
+            
+            // Cleanup browser if it was created
+            if (browser) {
+                try {
+                    await browser.close();
+                } catch (cleanupError) {
+                    console.error('Error cleaning up browser:', cleanupError);
+                }
+            }
+            
             return null;
         }
     }

@@ -1,6 +1,6 @@
 {
   "name": "enspotification",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Spotify Discord Bot with Spotify Connect and Discord Voice Channel integration",
   "main": "src/index.js",
   "scripts": {
