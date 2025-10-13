@@ -1,8 +1,8 @@
 services:
   enspotification:
-    build: .
+    image: sluberskihomelab/enspotification:latest
     ports:
-      - "127.0.0.1:3000:3000"  # Only bind to localhost for reverse proxy
+      - 3000:3000
     environment:
       - NODE_ENV=production
     env_file:

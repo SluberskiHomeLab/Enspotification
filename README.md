@@ -54,15 +54,25 @@ This bot is for educational and personal use. Make sure to comply with Spotify's
 
 A portion of this was also vibe coded.  This is a learning project for myself so it is not perfect, but I do my best to verify code and use 3rd party code review to make sure everything is safe.
 
+## Version History
+
+- **v0.1.0** - Initial release
+  - Discord slash commands integration
+  - Spotify Web Playback SDK support
+  - Reverse proxy compatibility
+  - Docker deployment ready
+
+## Security Notes
+
+- Container runs as non-root user (`enspotify`)
+- Includes security headers and CORS configuration  
+- Health checks for container monitoring
+- Proper timeout configurations for reverse proxy compatibility
+
 ## Support
 
-If you encounter issues:
-
-1. Check the troubleshooting section in the wiki
-2. Review the logs for error messages
-3. Ensure all prerequisites are met
-4. Open an issue with detailed information about your setup
-
----
+- **Repository**: https://github.com/SluberskiHomeLab/Enspotification
+- **Docker Hub**: https://hub.docker.com/r/sluberskihomelab/enspotification
+- **Issues**: Create an issue on the GitHub repository
 
 **Made with ❤️ for the Discord and Spotify communities**
