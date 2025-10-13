@@ -34,7 +34,7 @@ Once the bot is running and invited to your server, use these slash commands:
 1. **Connect**: Use `/join` to get a personalized Spotify authorization link
 2. **Authenticate**: Click the link to connect your Spotify account
 3. **Activate**: The bot will appear as "Enspotification (Discord Bot)" in your Spotify Connect devices
-4. **Control**: Use Discord commands or select the device in your Spotify app for playbook
+4. **Control**: Use Discord commands or select the device in your Spotify app for playback
 
 ## Contributing
 
