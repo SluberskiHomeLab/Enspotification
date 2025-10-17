@@ -2,6 +2,7 @@
 
 A Discord bot that connects to Spotify and acts as a Spotify Connect device, allowing users to control their music playback directly from Discord.
 
+Currently In-Development.  This is not functional at this point in time.  Hoping that I will be able to complete it by November of 2025
 ## Features
 
 - 🎵 **Spotify Connect Device**: Acts as a virtual Spotify speaker that appears in your Spotify app
