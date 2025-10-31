@@ -20,14 +20,18 @@ RUN apk add --no-cache \
     pulseaudio-dev \
     alsa-utils \
     alsa-lib \
-    alsa-lib-dev
+    alsa-lib-dev \
+    libsodium \
+    libsodium-dev
 
 # Set working directory
 WORKDIR /app
 
-# Set Puppeteer environment variables
+# Set Puppeteer and Playwright environment variables
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true \
+    PLAYWRIGHT_BROWSERS_PATH=/usr/lib/chromium
 
 # Configure PulseAudio for virtual audio devices
 RUN mkdir -p /etc/pulse

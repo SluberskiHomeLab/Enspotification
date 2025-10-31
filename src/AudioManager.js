@@ -98,6 +98,14 @@ class AudioManager {
             let output = '';
             let error = '';
 
+            pactl.on('error', (error) => {
+                if (error.code === 'ENOENT') {
+                    reject(new Error('PulseAudio (pactl) not found - audio capture not available'));
+                } else {
+                    reject(error);
+                }
+            });
+
             pactl.stdout.on('data', (data) => {
                 output += data.toString();
             });
@@ -178,6 +186,14 @@ class AudioManager {
                     env: {
                         PULSE_RUNTIME_PATH: '/tmp/pulse',
                         XDG_RUNTIME_DIR: '/tmp/pulse'
+                    }
+                });
+
+                pactl.on('error', (error) => {
+                    if (error.code === 'ENOENT') {
+                        reject(new Error('PulseAudio (pactl) not found - audio capture not available'));
+                    } else {
+                        reject(error);
                     }
                 });
 
