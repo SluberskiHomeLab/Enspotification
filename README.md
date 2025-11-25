@@ -1,3 +1,7 @@
+# Enspotification has now been moved to forgejo.  This repository is archived on Github.  Any future development will be done at the below link  
+
+Forgejo Repo: https://git.sluberskihomelab.com/Public/Enspotification
+
 # Enspotification - Spotify Discord Bot
 
 A Discord bot that connects to Spotify and acts as a Spotify Connect device, allowing users to control their music playback directly from Discord.
